@@ -21,9 +21,9 @@ def u_0(x):
 #%% Define parameters and grid
 
 x_lower, x_upper = 0, 1
-t_0, n_t = 0, 800
+t_0, n_t = 0, 16000
 c = 1
-dx = 0.01
+dx = 0.001
 dt = 0.1 * dx / c
 x_points = np.linspace(x_lower, x_upper, int((x_upper - x_lower) / dx) + 1)
 t_points = np.linspace(0, n_t * dt, n_t + 1)
@@ -70,6 +70,18 @@ def animate_exact(i):
 
 anim = animation.FuncAnimation(fig, animate_exact, frames=np.arange(0, n_t, 40), interval=100, blit=True)
 HTML(anim.to_jshtml())
+
+#%%
+x_sensors = [1,25,50,75,99]#np.linspace(0, 100, 3)
+x_colors = ['red', 'green', 'blue', 'orange', 'purple']
+
+fig, ax = plt.subplots(len(x_sensors), 1, figsize=(10, 15), sharex=True)
+for i, x_i in enumerate(x_sensors):
+    color = x_colors[i]
+    ax[i].plot(t_points[:], u_exact[x_i, :], label=f'Sensor at x={x_points[x_i]:.2f}', color=color)
+    ax[i].set_title(f'Sensor at x={x_points[x_i]:.2f}')
+    ax[i].set_ylim(-1, 1)
+
 
 
 #%%
