@@ -62,7 +62,7 @@ fig, ax = plt.subplots()
 line, = ax.plot(x_points, u_exact[:, 0])
 def animate_exact(i):
     line.set_data((x_points, u_exact[:, i]))
-    time_step = np.round(t_points[i], 3)
+    time_step = np.round(t_points[i], 1)
     plt.title('Time: ' + str(time_step))
     plt.xlabel('$x$')
     plt.ylabel('$u(x, ' + str(time_step) + ')$')
