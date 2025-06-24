@@ -21,7 +21,7 @@ def u_0(x):
 #%% Define parameters and grid
 
 x_min, x_max = 0, 1 # [m]
-t_0, t_max = 0, 2 # [s] original t_max = 4. # Reduced for faster computation
+t_0, t_max = 0, 1 # [s] original t_max = 4. # Reduced for faster computation
 c = 1
 dx = 0.01
 dt = 0.2 * dx / c
@@ -184,10 +184,15 @@ N_bc = 100  # boundary condition points, not necessarily evenly spaced, and len(
 # Collocation points: interior of space-time domain
 x_f = torch.rand((N_f, 1), dtype=torch.float32) * (x_max - x_min) + x_min
 t_f = torch.rand((N_f, 1), dtype=torch.float32) * (t_max - t_0) + t_0
+#x_f = (x_f - (x_max + x_min)/2 ) / ((x_max - x_min)/2) # Normalize x_f to [-1, 1]
+# t_f = (t_f - (t_max + t_0)  /2 ) / ((t_max - t_0  )/2) # Normalize t_f to [-1, 1]
+
 
 # IC: at t=0 we set u(x, 0) = u_0 and u_t(x, 0) = u_t_0
 x_ic = torch.rand((N_ic, 1), dtype=torch.float32) * (x_max - x_min) + x_min
+# x_ic = (x_ic - (x_max + x_min)/2 ) / ((x_max - x_min)/2)  # Normalize x_ic to [-1, 1]
 t_ic = torch.zeros_like(x_ic)
+# x_points = (x_points - (x_max + x_min)/2 ) / ((x_max - x_min)/2)  # Normalize x_points to [-1, 1]
 u_ic = np.interp(x_ic,x_points,u_exact[:, 0])  # Using the analytical solution for initial condition
 u_t_ic = np.interp(x_ic,x_points,(u_exact[:, 1]-u_exact[:, 0])/dt)  # Using the analytical solution for initial condition
 # otherwise, we could use u_fd[:, 1] - u_fd[:, 0] / dt
@@ -195,8 +200,10 @@ u_t_ic = np.interp(x_ic,x_points,(u_exact[:, 1]-u_exact[:, 0])/dt)  # Using the 
  
 # BC: at x=0 and x=1 we set u(0, t) = 0 and u(1, t) = 0 (Dirichlet type)
 t_bc = torch.rand((N_bc, 1), dtype=torch.float32) * (t_max - t_0) + t_0
+# t_bc = (t_bc - (t_max + t_0) / 2) / ((t_max - t_0) / 2)  # Normalize t_bc to [-1, 1]
 x_bc_left  = torch.zeros_like(t_bc)
 x_bc_right = torch.ones_like(t_bc)
+# t_points = (t_points - (t_max + t_0) / 2) / ((t_max - t_0) / 2)  # Normalize t_points to [-1, 1]
 u_bc_left  = np.interp(t_bc, t_points, u_exact[0, :])  # u(0, t)
 u_bc_right = np.interp(t_bc, t_points, u_exact[-1, :])  # u(1, t)
 
@@ -405,8 +412,8 @@ check_gradients(u_test, [x_test, t_test], ["x", "t"])
 # Initialize model, optimizer, and training parameters
 
 # Define model
-model = WavePINN([2, 64, 64, 1]).to(device)
-optimizer = Adam(model.parameters(), lr=1e-3)
+# model = WavePINN(layers).to(device)
+optimizer = Adam(model.parameters(), lr=1e-2)
 
 # Generate data
 # (x_f, t_f,
@@ -420,7 +427,7 @@ history = train(model, optimizer, epochs=20000, print_every=500,
                 x_ic=x_ic, t_ic=t_ic, u_ic=u_ic, u_t_ic=u_t_ic,
                 x_bc_left=x_bc_left, x_bc_right=x_bc_right, t_bc=t_bc,
                 u_bc_left=u_bc_left, u_bc_right=u_bc_right,
-                l_pde=1.0, l_ic=1.0, l_ic_t=1.0, l_bc_l=1.0, l_bc_r=1.0)
+                l_pde=1.0e-2, l_ic=1.0, l_ic_t=1.0e-2, l_bc_l=1.0, l_bc_r=1.0)
 
 # Save and plot
 save_model(model)
@@ -429,7 +436,7 @@ plot_losses(history)
 
 # %%
 # model reloading (to avoid retraining, if needed)
-model = WavePINN([2, 64, 64, 1]).to(device)
+# model = WavePINN(layers).to(device)
 model.load_state_dict(torch.load("wavepinn_model.pth"))
 # model.eval()  # Set model to evaluation mode
 
@@ -441,6 +448,9 @@ Nx= 101  # Number of points in x
 Nt = 1001  # Number of points in t
 x_eval = torch.linspace(x_min, x_max, Nx).view(-1, 1).to(device)
 t_eval = torch.linspace(t_0, t_max, Nt).view(-1, 1).to(device)
+# x_eval_N = (x_eval - (x_max + x_min)/2 ) / ((x_max - x_min)/2)  # Normalize x_eval to [-1, 1]
+# t_eval_N = (t_eval - (t_max + t_0) / 2) / ((t_max - t_0) / 2)  # Normalize t_eval to [-1, 1]
+# x_grid, t_grid = torch.meshgrid(x_eval_N.squeeze(), t_eval_N.squeeze(), indexing='ij') # shape (Nx, Nt)
 x_grid, t_grid = torch.meshgrid(x_eval.squeeze(), t_eval.squeeze(), indexing='ij') # shape (Nx, Nt)
 x_input = x_grid.reshape(-1, 1) # flattens the grid
 t_input = t_grid.reshape(-1, 1) # flattens the grid
@@ -453,6 +463,8 @@ with torch.no_grad():
 # Reconstruct meshgrid for contours from evaluation range
 x_vals = x_eval[:, 0].cpu().numpy()
 t_vals = t_eval[:, 0].cpu().numpy()
+# x_vals = x_vals * ((x_max - x_min)/2) + (x_max + x_min)/2 # Rescale back to original range
+# t_vals = t_vals * ((t_max - t_0) / 2) + (t_max + t_0) / 2  # Rescale back to original range
 X, T = np.meshgrid(x_vals, t_vals, indexing='ij')  # X: (Nx, Nt), T: (Nx, Nt)
 
 # Plot the results
