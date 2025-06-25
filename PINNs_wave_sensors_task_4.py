@@ -1,8 +1,20 @@
 #%% Import libraries
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from IPython.display import HTML
+
+# Load Pytorch Modules and device definition
+import torch
+import torch.nn as nn
+import torch.nn.init as init
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+
+# Set random seed for reproducibility
+torch.manual_seed(789)
+
 
 #%% Function definition
 def u_0(x):
@@ -17,6 +29,19 @@ def u_0(x):
         return 20*(0.55-x)
     elif x>=0.55 and x<=1:
         return 0
+
+
+#%% Source time function (Gaussian)
+# def u_0(x):
+#     # Parameters for the Gaussian
+#     a = 0.05  # width parameter (standard deviation)
+#     x0 = 0.5    # center of the Gaussian
+#     scale = 10
+# 
+#     # First derivative of a Gaussian
+#     s = (x - x0)
+#     return 1/scale * -s / (a ** 2) * math.exp(-s**2 / (2 * a**2))
+
 
 #%% Define parameters and grid
 
@@ -177,58 +202,43 @@ summary(model, input_size=(2,)) # This will show the model summary for a single 
 
 # Number of points
 N_f = 5000  # collocation (residual) points, not necessarily evenly spaced, and len(x_points) x len(t_points)
-N_ic = 100  # initial condition points, not necessarily evenly spaced, and len(x_points) 
-N_bc = 100  # boundary condition points, not necessarily evenly spaced, and len(t_points)
+# N_s = len(t_points)  # sensor points (inherited from the anaytical solution)
 
 
 # Collocation points: interior of space-time domain
 x_f = torch.rand((N_f, 1), dtype=torch.float32) * (x_max - x_min) + x_min
 t_f = torch.rand((N_f, 1), dtype=torch.float32) * (t_max - t_0) + t_0
-#x_f = (x_f - (x_max + x_min)/2 ) / ((x_max - x_min)/2) # Normalize x_f to [-1, 1]
-# t_f = (t_f - (t_max + t_0)  /2 ) / ((t_max - t_0  )/2) # Normalize t_f to [-1, 1]
 
 
-# IC: at t=0 we set u(x, 0) = u_0 and u_t(x, 0) = u_t_0
-x_ic = torch.rand((N_ic, 1), dtype=torch.float32) * (x_max - x_min) + x_min
-# x_ic = (x_ic - (x_max + x_min)/2 ) / ((x_max - x_min)/2)  # Normalize x_ic to [-1, 1]
-t_ic = torch.zeros_like(x_ic)
-# x_points = (x_points - (x_max + x_min)/2 ) / ((x_max - x_min)/2)  # Normalize x_points to [-1, 1]
-u_ic = np.interp(x_ic,x_points,u_exact[:, 0])  # Using the analytical solution for initial condition
-u_t_ic = np.interp(x_ic,x_points,(u_exact[:, 1]-u_exact[:, 0])/dt)  # Using the analytical solution for initial condition
-# otherwise, we could use u_fd[:, 1] - u_fd[:, 0] / dt
-# or ignore u_t_ic and set it to zero
- 
-# BC: at x=0 and x=1 we set u(0, t) = 0 and u(1, t) = 0 (Dirichlet type)
-t_bc = torch.rand((N_bc, 1), dtype=torch.float32) * (t_max - t_0) + t_0
-# t_bc = (t_bc - (t_max + t_0) / 2) / ((t_max - t_0) / 2)  # Normalize t_bc to [-1, 1]
-x_bc_left  = torch.zeros_like(t_bc)
-x_bc_right = torch.ones_like(t_bc)
-# t_points = (t_points - (t_max + t_0) / 2) / ((t_max - t_0) / 2)  # Normalize t_points to [-1, 1]
-u_bc_left  = np.interp(t_bc, t_points, u_exact[0, :])  # u(0, t)
-u_bc_right = np.interp(t_bc, t_points, u_exact[-1, :])  # u(1, t)
+# Sensors data (Dirichlet type data)
+n_rec = 19
+receivers = np.linspace(np.min(x_points), np.max(x_points), n_rec+2)
+receivers = receivers[1:-1] # remove first and last points to avoid including boundaries
+observations = np.zeros((len(t_points), n_rec))
+for j in range(len(t_points)):
+    # Interpolate u_exact at receiver locations for this time step
+    observations[j, :] = np.interp(receivers, x_points, u_exact[:, j])
 
-# Convert to tensors and move to device
+# Convert to torch tensors and move to device
 x_f = x_f.to(device)
 t_f = t_f.to(device)
-x_ic = x_ic.to(device)
-t_ic = t_ic.to(device)
-u_ic = torch.tensor(u_ic, dtype=torch.float32).to(device)
-u_t_ic = torch.tensor(u_t_ic, dtype=torch.float32).to(device)
-x_bc_left = x_bc_left.to(device)
-x_bc_right = x_bc_right.to(device)
-t_bc = t_bc.to(device)
-u_bc_left = torch.tensor(u_bc_left, dtype=torch.float32).to(device)
-u_bc_right = torch.tensor(u_bc_right, dtype=torch.float32).to(device)   
+receivers_torch = torch.tensor(receivers, dtype=torch.float32).to(device)  # shape: (n_rec,)
+observations_torch = torch.tensor(observations, dtype=torch.float32).to(device)  # shape: (len(t_points), n_rec)
+
+plt.figure(figsize=(8,4))
+plt.imshow(np.flipud(observations.T), aspect='auto')
+plt.title('Map based on Sensor Observations (u(x, t))')
+plt.xlabel('Time step #')
+plt.ylabel('Receiver index #')
+plt.colorbar()
+plt.show()
+
 # Print shapes for verification
 print(f"x_f shape: {x_f.shape}, t_f shape: {t_f.shape}")
-print(f"x_ic shape: {x_ic.shape}, t_ic shape: {t_ic.shape}, u_ic shape: {u_ic.shape}, u_t_ic shape: {u_t_ic.shape}")
-print(f"x_bc_left shape: {x_bc_left.shape}, x_bc_right shape: {x_bc_right.shape}, t_bc shape: {t_bc.shape}")
-print(f"u_bc_left shape: {u_bc_left.shape}, u_bc_right shape: {u_bc_right.shape}")
+print(f"observation shape: {observations_torch.shape}, receivers shape: {receivers_torch.shape}")
 # Check if all tensors are on the correct device
-print(f"Device: {x_f.device}, t_f device: {t_f.device}, x_ic device: {x_ic.device}, t_ic device: {t_ic.device}")
-print(f"u_ic device: {u_ic.device}, u_t_ic device: {u_t_ic.device}, x_bc_left device: {x_bc_left.device}")
-print(f"x_bc_right device: {x_bc_right.device}, t_bc device: {t_bc.device}")
-print(f"u_bc_left device: {u_bc_left.device}, u_bc_right device: {u_bc_right.device}")  
+print(f"Device: {x_f.device}, t_f device: {t_f.device}")
+print(f"observation device: {observations_torch.device}, receivers device: {receivers_torch.device}")
 
 
 
@@ -252,41 +262,13 @@ def pde(model, x, t, c=1.0):
     residual = u_tt - c**2 * u_xx
     return residual
 
-# IC_0 residual
-def ic_0(model, x, t, u_ic):
+# Sensors residual
+def data(model, x, t, obs_data):
     x.requires_grad_(True)
     t.requires_grad_(True)
     u = model(torch.cat((x, t), dim=1))
 
-    residual = u - u_ic
-    return residual
-
-# IC_t_0 residual (time derivative at initial condition)
-def ic_t_0(model, x, t, u_t_ic):
-    x.requires_grad_(True)
-    t.requires_grad_(True)
-    u = model(torch.cat((x, t), dim=1))
-    u_t = torch.autograd.grad(u, t, torch.ones_like(u), retain_graph=True, create_graph=True)[0]
-
-    residual = u_t - u_t_ic
-    return residual
-
-# Left BC residual
-def bc_left(model, x, t, u_bc_left):
-    x.requires_grad_(True)
-    t.requires_grad_(True)
-    u = model(torch.cat((x, t), dim=1))
-
-    residual = u - u_bc_left
-    return residual
-
-# Right BC residual
-def bc_right(model, x, t, u_bc_right):
-    x.requires_grad_(True)
-    t.requires_grad_(True)
-    u = model(torch.cat((x, t), dim=1))
-
-    residual = u - u_bc_right
+    residual = u - obs_data
     return residual
 
 
@@ -296,10 +278,8 @@ def bc_right(model, x, t, u_bc_right):
 from torch.optim import Adam
 
 def train(model, optimizer, epochs, print_every,
-          x_f, t_f, x_ic, t_ic, u_ic, u_t_ic,
-          x_bc_left, x_bc_right, t_bc,
-          u_bc_left, u_bc_right,
-          l_pde, l_ic, l_ic_t, l_bc_l, l_bc_r):
+          x_f, t_f, x_obs, t_obs,
+          l_pde, l_data, measurement):
 
     history = []
 
@@ -309,17 +289,11 @@ def train(model, optimizer, epochs, print_every,
 
         ## LOSSES:
         loss_pde = torch.mean((pde(model, x_f, t_f, c=1.0))**2)
-        loss_ic_u = torch.mean((ic_0(model, x_ic, t_ic, u_ic))**2)
-        loss_ic_ut = torch.mean((ic_t_0(model, x_ic, t_ic, u_t_ic))**2)
-        loss_bc_left = torch.mean((bc_left(model, x_bc_left, t_bc, u_bc_left))**2)
-        loss_bc_right = torch.mean((bc_right(model, x_bc_right, t_bc, u_bc_right))**2)
+        loss_data = torch.mean((data(model, x_obs, t_obs, measurement))**2)  # if we want to use data loss 
 
         # === Total loss ===
-        loss = (l_pde * loss_pde + 
-                l_ic * loss_ic_u + 
-                l_ic_t * loss_ic_ut + 
-                l_bc_l * loss_bc_left + 
-                l_bc_r * loss_bc_right)
+        loss = (l_pde * loss_pde +
+                l_data * loss_data)
         '''
         loss = (l_pde * loss_pde / loss_pde.detach() +
                 l_ic * loss_ic_u / loss_ic_u.detach() +
@@ -333,10 +307,10 @@ def train(model, optimizer, epochs, print_every,
         optimizer.step()
 
         # Store history
-        history.append([loss.item(), loss_pde.item(), loss_ic_u.item(), loss_ic_ut.item(), loss_bc_left.item(), loss_bc_right.item()])
+        history.append([loss.item(), l_pde * loss_pde.item(), l_data * loss_data.item()])
 
         if epoch % print_every == 0:
-            print(f"[{epoch}] Total: {loss.item():.4e} | PDE: {loss_pde.item():.4e} | IC_u: {loss_ic_u.item():.4e} | IC_ut: {loss_ic_ut.item():.4e} | BC_l: {loss_bc_left.item():.4e} | BC_r: {loss_bc_right.item():.4e}")
+            print(f"[{epoch}] Total: {loss.item():.4e} | PDE: {loss_pde.item():.4e} | Data: {loss_data.item():.4e}")
 
     return history
 
@@ -347,9 +321,9 @@ def train(model, optimizer, epochs, print_every,
 import matplotlib.pyplot as plt
 import os
 
-save_model_path = "wavepinn_model.pth"
+saved_model_path = "wavepinn_model_sensors_task_4.pth"
 
-def save_model(model, path=save_model_path):
+def save_model(model, path=saved_model_path):
     torch.save(model.state_dict(), path)
     print(f"[💾] Model saved to: {os.path.abspath(path)}")
 
@@ -358,10 +332,7 @@ def plot_losses(history):
     plt.figure(figsize=(10, 6))
     plt.plot(history[:, 0], label="Total Loss")
     plt.plot(history[:, 1], label="PDE Loss")
-    plt.plot(history[:, 2], label="IC (u) Loss")
-    plt.plot(history[:, 3], label="IC (ut) Loss")
-    plt.plot(history[:, 4], label="BC Loss Left")
-    plt.plot(history[:, 5], label="BC Loss Right")
+    plt.plot(history[:, 2], label="Data Loss")
     plt.yscale('log')
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
@@ -417,19 +388,24 @@ check_gradients(u_test, [x_test, t_test], ["x", "t"])
 # model = WavePINN(layers).to(device)
 optimizer = Adam(model.parameters(), lr=1e-2)
 
-# Generate data
-# (x_f, t_f,
-#  x_ic, t_ic, u_ic, ut_ic,
-#  x_bc_left, x_bc_right, t_bc,
-#  u_bc_left, u_bc_right) = generate_training_data()
+# Prepare observation input pairs and targets for data loss
+# x_obs: (n_rec,), t_obs: (n_time_steps,)
+x_obs_grid, t_obs_grid = torch.meshgrid(
+    receivers_torch, torch.tensor(t_points, dtype=torch.float32).to(device), indexing='ij'
+)  # both shape: (n_rec, n_time_steps)
 
-# Train the model
-history = train(model, optimizer, epochs=100000, print_every=500,
-                x_f=x_f, t_f=t_f,
-                x_ic=x_ic, t_ic=t_ic, u_ic=u_ic, u_t_ic=u_t_ic,
-                x_bc_left=x_bc_left, x_bc_right=x_bc_right, t_bc=t_bc,
-                u_bc_left=u_bc_left, u_bc_right=u_bc_right,
-                l_pde=1.0e-2, l_ic=1.0, l_ic_t=1.0e-2, l_bc_l=1.0, l_bc_r=1.0)
+# Flatten to (n_rec * n_time_steps, 1)
+x_obs_flat = x_obs_grid.reshape(-1, 1)
+t_obs_flat = t_obs_grid.reshape(-1, 1)
+measurement_flat = observations_torch.T.reshape(-1, 1)  # observations_torch: (n_time_steps, n_rec) → (n_rec, n_time_steps) → flatten
+
+# Now pass these to the train function
+history = train(
+    model, optimizer, epochs=100000, print_every=500,
+    x_f=x_f, t_f=t_f,
+    x_obs=x_obs_flat, t_obs=t_obs_flat,
+    l_pde=1e-2, l_data=1.0, measurement=measurement_flat
+)
 
 # Save and plot
 save_model(model)
@@ -439,7 +415,7 @@ plot_losses(history)
 # %%
 # model reloading (to avoid retraining, if needed)
 # model = WavePINN(layers).to(device)
-model.load_state_dict(torch.load(save_model_path))
+model.load_state_dict(torch.load(saved_model_path))
 # model.eval()  # Set model to evaluation mode
 
 
@@ -450,9 +426,6 @@ Nx= 101  # Number of points in x
 Nt = 1001  # Number of points in t
 x_eval = torch.linspace(x_min, x_max, Nx).view(-1, 1).to(device)
 t_eval = torch.linspace(t_0, t_max, Nt).view(-1, 1).to(device)
-# x_eval_N = (x_eval - (x_max + x_min)/2 ) / ((x_max - x_min)/2)  # Normalize x_eval to [-1, 1]
-# t_eval_N = (t_eval - (t_max + t_0) / 2) / ((t_max - t_0) / 2)  # Normalize t_eval to [-1, 1]
-# x_grid, t_grid = torch.meshgrid(x_eval_N.squeeze(), t_eval_N.squeeze(), indexing='ij') # shape (Nx, Nt)
 x_grid, t_grid = torch.meshgrid(x_eval.squeeze(), t_eval.squeeze(), indexing='ij') # shape (Nx, Nt)
 x_input = x_grid.reshape(-1, 1) # flattens the grid
 t_input = t_grid.reshape(-1, 1) # flattens the grid
@@ -465,8 +438,6 @@ with torch.no_grad():
 # Reconstruct meshgrid for contours from evaluation range
 x_vals = x_eval[:, 0].cpu().numpy()
 t_vals = t_eval[:, 0].cpu().numpy()
-# x_vals = x_vals * ((x_max - x_min)/2) + (x_max + x_min)/2 # Rescale back to original range
-# t_vals = t_vals * ((t_max - t_0) / 2) + (t_max + t_0) / 2  # Rescale back to original range
 X, T = np.meshgrid(x_vals, t_vals, indexing='ij')  # X: (Nx, Nt), T: (Nx, Nt)
 
 # Plot the results
